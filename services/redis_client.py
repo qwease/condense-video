@@ -21,7 +21,8 @@ from core.exceptions import StorageException
 
 
 # Redis 重试策略
-retry = Retry(ExponentialBackoff(attempts=3), "")
+# ExponentialBackoff doesn't take 'attempts' - the Retry count is the second arg
+retry = Retry(ExponentialBackoff(), 3)
 
 # Redis 客户端实例
 redis: Redis | None = None
@@ -49,7 +50,6 @@ def get_redis() -> Redis:
                 socket_connect_timeout=5,
                 socket_timeout=5,
                 retry=retry,
-                retry_on_error=True,
             )
             # 测试连接
             redis.ping()

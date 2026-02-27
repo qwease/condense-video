@@ -1,0 +1,11 @@
+# requirements/all.txt
+# 所有依赖（开发 + API + Worker）
+
+-r api.txt
+-r worker.txt
+
+# 测试依赖
+pytest>=7.4
+pytest-cov>=4.1
+pytest-asyncio>=0.21
+pytest-mock>=3.11

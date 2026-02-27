@@ -16,6 +16,12 @@ logger = setup_logging()
 # 创建 Celery 应用
 celery_app = Celery("condense_video")
 
+# 自动发现任务
+celery_app.autodiscover_tasks(["tasks"])
+
+# 显式导入任务模块以确保注册
+from tasks import video, workflows, asr, ppt, llm, tts  # noqa: F401, E402
+
 # Celery 配置
 celery_app.config_from_object(
     {

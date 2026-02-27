@@ -50,6 +50,9 @@ def process_video_workflow(
     mode: str = "essential",
     tts_engine: str = "dashscope",
     tts_voice: str = "Cherry",
+    skip_transcribe: bool = False,
+    skip_ocr: bool = False,
+    options: dict | None = None,
 ) -> dict:
     """
     完整的视频处理工作流
@@ -62,6 +65,9 @@ def process_video_workflow(
         mode: 浓缩模式 (essential, complete)
         tts_engine: TTS 引擎
         tts_voice: TTS 音色
+        skip_transcribe: 跳过 ASR 转录
+        skip_ocr: 跳过 PPT OCR
+        options: 其他选项
 
     Returns:
         处理结果

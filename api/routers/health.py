@@ -8,7 +8,7 @@ from fastapi import APIRouter, status
 from fastapi.responses import PlainTextResponse
 
 from core.config import settings
-from schemas.responses import (
+from api.schemas.responses import (
     ConfigResponse,
     HealthCheck,
     HealthResponse,

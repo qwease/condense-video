@@ -11,11 +11,12 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import Path as FastAPIPath
 from fastapi.responses import FileResponse, StreamingResponse
 
-from schemas.common import ErrorCode, ProcessingMode, TaskStatus, TTSEngine
-from schemas.requests import ProcessVideoRequest
-from schemas.responses import (
+from api.schemas.common import ErrorCode, ProcessingMode, TaskStatus, TTSEngine
+from api.schemas.requests import ProcessVideoRequest
+from api.schemas.responses import (
     ErrorResponse,
     TaskSubmitResponse,
     VideoProcessResult,
@@ -322,7 +323,7 @@ async def download_video_file(
 @router.get("/{video_id}/file/{file_type}", summary="下载特定文件")
 async def download_file(
     video_id: str,
-    file_type: str = Query(description="文件类型"),
+    file_type: str = FastAPIPath(description="文件类型"),
 ):
     """
     下载特定的输出文件
@@ -426,7 +427,7 @@ async def download_file(
 
 def _build_process_result(result_data: dict) -> VideoProcessResult:
     """从 Redis 结果数据构建 VideoProcessResult"""
-    from schemas.responses import (
+    from api.schemas.responses import (
         ChapterInfo,
         ScriptFileInfo,
         Statistics,

@@ -6,13 +6,13 @@
 
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import UUID
 
-from schemas.common import ErrorCode, TaskStatus
-from schemas.requests import TaskCancelRequest
-from schemas.responses import (
+from api.schemas.common import ErrorCode, TaskStatus
+from api.schemas.requests import TaskCancelRequest
+from api.schemas.responses import (
     ErrorResponse,
     TaskCancelResponse,
     TaskLogEntry,

@@ -192,6 +192,15 @@ class LocalStorage(StorageBackend):
         """
         return self._get_full_path(object_name).exists()
 
+    def health_check(self) -> bool:
+        """
+        检查存储健康状态
+
+        Returns:
+            是否健康
+        """
+        return self.base_path.exists() and self.base_path.is_dir()
+
 
 class MinIOStorage(StorageBackend):
     """
@@ -291,6 +300,20 @@ class MinIOStorage(StorageBackend):
         """
         try:
             self.client.stat_object(self.bucket, object_name)
+            return True
+        except Exception:
+            return False
+
+    def health_check(self) -> bool:
+        """
+        检查存储健康状态
+
+        Returns:
+            是否健康
+        """
+        try:
+            # 尝试列出 bucket 来检查连接
+            self.client.list_buckets()
             return True
         except Exception:
             return False
@@ -395,6 +418,20 @@ class S3Storage(StorageBackend):
             self.client.head_object(Bucket=self.bucket, Key=object_name)
             return True
         except self.client.exceptions.ClientError:
+            return False
+
+    def health_check(self) -> bool:
+        """
+        检查存储健康状态
+
+        Returns:
+            是否健康
+        """
+        try:
+            # 尝试列出对象来检查连接
+            self.client.list_objects_v2(Bucket=self.bucket, MaxKeys=1)
+            return True
+        except Exception:
             return False
 
 

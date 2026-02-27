@@ -4,6 +4,7 @@
 根据分类结果剪辑视频，保留核心内容。
 """
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -136,12 +137,12 @@ def edit_video(
         temp_dir.mkdir(exist_ok=True)
 
         # 方案: 使用 FFmpeg concat filter 合并片段
-        condensed_video = await _create_condensed_video(
+        condensed_video = asyncio.run(_create_condensed_video(
             video_path=video_path,
             segments=filtered_segments,
             output_dir=str(temp_dir),
             final_output=str(output_path / "condensed_course.mp4"),
-        )
+        ))
 
         update_progress(
             task_id,
@@ -362,11 +363,11 @@ def merge_video_with_audio(
     logger.info(f"合并视频和音频: {video_path} + {audio_path}")
 
     try:
-        result = await merge_audio_video(
+        result = asyncio.run(merge_audio_video(
             video_path=video_path,
             audio_path=audio_path,
             output_path=output_path,
-        )
+        ))
 
         return {
             "success": True,

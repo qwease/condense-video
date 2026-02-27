@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 
 from core.config import settings
 from core.logging import setup_logging
-from routers import health_router, tasks_router, videos_router, ws_router
+from api.routers import health_router, tasks_router, videos_router, ws_router
 
 # 设置日志
 logger = setup_logging()
