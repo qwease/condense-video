@@ -10,6 +10,7 @@ from celery.utils.log import get_task_logger
 from tasks.celery_app import celery_app
 from tasks.video.download import download_video, receive_video
 from tasks.video.audio_extract import extract_audio_task, upload_audio_for_asr
+from tasks.video.edit import edit_video, merge_video_with_audio
 from tasks.asr.transcribe import transcribe_audio, convert_transcript
 from tasks.ppt.extract import extract_ppt_frames
 from tasks.ppt.ocr import ocr_slides
@@ -206,13 +207,30 @@ def _build_processing_chain(
         voice=tts_voice,
     )
 
+    # 视频剪辑步骤 (可选)
+    edit_video_step = edit_video.s(
+        task_id=task_id,
+        video_path=f"{paths['base']}/input/{task_id}.mp4",
+        classification_file=f"{paths['script']}/classification.json",
+        output_dir=paths['video'],
+        mode=mode,
+    )
+
+    # 合成视频和 TTS 音频步骤 (可选)
+    merge_video_step = merge_video_with_audio.s(
+        task_id=task_id,
+        video_path=None,  # 从上一步获取
+        audio_path=f"{paths['audio']}/tts_audio.mp3",
+        output_path=f"{paths['video']}/condensed_tts.mp4",
+    )
+
     # 最终汇总任务
     final_step = finalize_processing.s(
         task_id=task_id,
         paths=paths,
     )
 
-    # 构建任务链: prev -> [asr, ppt] -> classify -> segment -> summarize -> [condense, tts] -> finalize
+    # 构建任务链: prev -> [asr, ppt] -> classify -> segment -> summarize -> [condense, tts] -> [edit, merge] -> finalize
     return chain(
         prev_step,
         parallel_step,
@@ -220,6 +238,7 @@ def _build_processing_chain(
         segment_step,
         summarize_step,
         chain(condense_tts_step, tts_step),
+        chain(edit_video_step, merge_video_step),
         final_step,
     )
 
@@ -326,6 +345,8 @@ def finalize_processing(
         "key_points": f"{paths['script']}/key_points.md",
         "condensed": f"{paths['script']}/condensed.txt",
         "tts_audio": f"{paths['audio']}/tts_audio.mp3",
+        "condensed_video": f"{paths['video']}/condensed_course.mp4",
+        "condensed_video_tts": f"{paths['video']}/condensed_tts.mp4",
         "ppt_frames": f"{paths['ppt']}/images",
         "ppt_ocr": f"{paths['ppt']}/ocr_result.json",
     }
