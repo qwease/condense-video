@@ -1,0 +1,21 @@
+Codemap Generation Report - condense-video
+Generated: 2026-02-27
+
+SUMMARY
+-------
+Created initial codemap documentation (100% new files)
+
+FILES CREATED
+-------------
+codemaps/architecture.md  - Overall architecture overview
+codemaps/backend.md       - Scripts, APIs, and configuration
+codemaps/data.md          - Data models and schemas
+
+ANALYSIS
+--------
+- Project Type: Claude Code Skill (video content extraction)
+- Languages: Node.js + Python hybrid
+- Key Dependencies: DashScope API, FFmpeg
+- Workflow: ASR transcription + PPT OCR + AI classification + TTS + video editing
+
+NO PREVIOUS CODEMAPS - Initial generation complete
