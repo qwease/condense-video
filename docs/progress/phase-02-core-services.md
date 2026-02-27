@@ -60,10 +60,19 @@
 
 ## 进行中
 
-### Phase 3: 工具层实现
-- [ ] 实现 `utils/ffmpeg.py`
-- [ ] 实现 `utils/video.py`
-- [ ] 实现 `utils/time.py`
+**无** - Phase 2 已完成
+
+---
+
+## 后续阶段完成状态
+
+### Phase 3: 工具层实现 ✅ 已完成
+- [x] 实现 `utils/ffmpeg.py` - FFmpeg 命令异步封装
+- [x] 实现 `utils/video.py` - 视频处理高级工具
+- [x] 实现 `utils/time.py` - 时间处理工具
+- [x] 实现 `utils/text.py` - 文本处理工具
+
+详见 `docs/progress/phase-03-utils.md`
 
 ---
 
