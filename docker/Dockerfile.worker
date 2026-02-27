@@ -1,0 +1,35 @@
+# Dockerfile for Celery Worker
+# 用于运行 Celery 任务和后台处理
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# 安装系统依赖 (包含 FFmpeg)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# 复制依赖文件
+COPY requirements/worker.txt requirements.txt
+
+# 安装 Python 依赖
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 复制应用代码
+COPY . .
+
+# 创建必要的目录
+RUN mkdir -p /app/data/temp && \
+    mkdir -p /tmp/ffmpeg
+
+# 暴露 Flower 端口 (用于监控)
+EXPOSE 5555
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD celery -A tasks.celery_app inspect ping || exit 1
+
+# 启动命令 (由 docker-compose 覆盖)
+CMD ["celery", "-A", "tasks.celery_app", "worker", "--loglevel=info"]

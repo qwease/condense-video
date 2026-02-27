@@ -1,0 +1,89 @@
+# Docker Compose 配置
+# 用于在 Windows 上运行 Linux-only 组件 (Celery Worker)
+
+version: '3.8'
+
+services:
+  # ============== Redis ==============
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - condense-video-network
+
+  # ============== MinIO (对象存储) ==============
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - condense-video-network
+
+  # ============== Celery Worker ==============
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    env_file:
+      - ../.env
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ../data:/app/data
+      - ../rules:/app/rules:ro
+      - /tmp/ffmpeg:/tmp/ffmpeg
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      replicas: ${WORKER_REPLICAS:-2}
+    command: celery -A tasks.celery_app worker --loglevel=info --concurrency=${WORKER_CONCURRENCY:-2}
+    networks:
+      - condense-video-network
+
+  # ============== Flower (Celery 监控面板) ==============
+  flower:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    ports:
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - redis
+    command: celery -A tasks.celery_app flower --port=5555 --broker=redis://redis:6379/0
+    networks:
+      - condense-video-network
+
+volumes:
+  redis_data:
+  minio_data:
+
+networks:
+  condense-video-network:
+    driver: bridge

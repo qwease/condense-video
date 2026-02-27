@@ -1,0 +1,16 @@
+# requirements/api.txt
+# API 服务依赖
+
+-r base.txt
+
+# Web 框架
+fastapi>=0.104
+uvicorn[standard]>=0.24
+websockets>=12.0
+
+# Celery (客户端)
+celery[redis]>=5.3
+flower>=2.0
+
+# 监控
+prometheus-client>=0.19

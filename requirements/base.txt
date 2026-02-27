@@ -1,0 +1,25 @@
+# requirements/base.txt
+# 基础依赖 - API 和 Worker 都需要
+
+# 数据验证
+pydantic>=2.0
+pydantic-settings>=2.0
+pydantic[email]
+
+# Redis 客户端
+redis>=5.0
+
+# HTTP 客户端
+httpx>=0.24
+
+# 环境变量
+python-dotenv>=1.0
+
+# 文件上传
+python-multipart>=0.0.6
+
+# 日志
+loguru>=0.7
+
+# 重试工具
+tenacity>=8.2

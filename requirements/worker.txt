@@ -1,0 +1,21 @@
+# requirements/worker.txt
+# Worker 依赖
+
+-r base.txt
+
+# Celery (Worker)
+celery[redis]>=5.3
+
+# 视频处理
+opencv-python>=4.8
+Pillow>=10.0
+imagehash>=4.3
+
+# HTTP 客户端 (支持 HTTP/2)
+httpx[http2]>=0.24
+
+# Edge TTS
+edge-tts>=6.1
+
+# MinIO (可选)
+minio>=7.0
