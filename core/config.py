@@ -43,6 +43,7 @@ class AppConfig(BaseSettings):
     api_port: int = Field(default=8000, alias="API_PORT", description="API 服务端口")
     api_workers: int = Field(default=1, alias="API_WORKERS", description="API 工作进程数")
     api_reload: bool = Field(default=False, alias="API_RELOAD", description="开发模式自动重载")
+    api_debug: bool = Field(default=False, alias="API_DEBUG", description="调试模式 - 输出详细日志")
 
     # ============== Celery 配置 ==============
     celery_broker_url: str = Field(
