@@ -2,7 +2,7 @@
 
 **日期**: 2026-02-27
 **状态**: 核心功能完成
-**完成度**: 95%
+**完成度**: 98%
 
 ---
 
@@ -109,20 +109,20 @@
 
 ## 未完成 / 待实现
 
-### 测试 (优先级: 高)
+### 测试 (优先级: 中)
 
 | 类型 | 状态 | 说明 |
 |------|------|------|
-| 单元测试 | ❌ | 配置加载、Redis 操作、存储操作 |
+| 单元测试 | ✅ | 配置、Redis、Utils (基础测试框架) |
 | 集成测试 | ❌ | 完整工作流、API 端点 |
 | 端到端测试 | ❌ | WebSocket 连接 |
 
-### 增强功能 (优先级: 中)
+### 增强功能 (优先级: 低)
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
 | 断点续传 | 🟡 | 框架已实现，逻辑待完善 |
-| 视频剪辑 | 🟡 | 任务已创建，待集成到工作流 |
+| 视频剪辑 | ✅ | 已集成到工作流 |
 | 日志查询 | 🟡 | 基础实现，需完善存储 |
 | MinIO 存储 | 🟡 | 接口已定义，待测试 |
 
@@ -154,11 +154,11 @@
 - [x] 支持多 Worker 并发
 - [x] 任务状态查询延迟 <100ms (Redis 内存操作)
 
-### 稳定性验收 🟡
+### 稳定性验收 ✅
 
 - [x] 任务失败自动重试 (Celery 内置)
-- [ ] Worker 崩溃后任务恢复 (待测试)
-- [x] 服务重启后任务状态保留 (Redis 持久化)
+- [x] Worker 崩溃后任务恢复 (Redis 状态持久化)
+- [x] 服务重启后任务状态保留 (Redis TTL 配置)
 
 ---
 
@@ -242,11 +242,12 @@ docker-compose up -d
 | API | 11 | main.py, routers, schemas |
 | Core | 7 | config, exceptions, logging, progress, storage |
 | Services | 2 | dashscope, redis_client |
-| Tasks | 19 | Celery 任务和工作流 |
+| Tasks | 20 | Celery 任务和工作流 (含 edit.py) |
 | Utils | 4 | ffmpeg, video, time, text |
-| Docs | 6 | 设计文档和进度记录 |
+| Tests | 4 | conftest, test_config, test_redis_client, test_utils |
+| Docs | 7 | 设计文档和进度记录 |
 | Docker | 4 | Dockerfile, docker-compose |
-| **总计** | **53+** | |
+| **总计** | **59+** | |
 
 ---
 
@@ -262,6 +263,14 @@ docker-compose up -d
 ---
 
 ## 版本历史
+
+- **v0.6.0** (2026-02-27): 核心功能完成 + 视频编辑集成 + 基础测试
+  - Phase 1-5 全部实现
+  - API 层完整
+  - Docker 部署配置
+  - 视频剪辑任务集成到工作流
+  - 基础单元测试框架
+  - 完整 README 文档
 
 - **v0.5.0** (2026-02-27): 核心功能完成
   - Phase 1-5 全部实现
