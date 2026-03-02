@@ -48,7 +48,7 @@ celery_app.config_from_object(
         "task_routes": {
             "tasks.video.*": {"queue": "video"},
             "tasks.asr.*": {"queue": "asr"},
-            "tasks.ppt.ocr": {"queue": "ocr"},
+            "tasks.ppt.*": {"queue": "ocr"},
             "tasks.llm.*": {"queue": "llm"},
             "tasks.tts.*": {"queue": "tts"},
         },

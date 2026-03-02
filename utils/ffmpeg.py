@@ -1,7 +1,7 @@
 """
 FFmpeg 封装模块
 
-提供 FFmpeg 命令的异步封装，支持：
+提供 FFmpeg 命令的同步封装，支持：
 - 音频提取
 - 帧提取
 - 视频剪辑与合成
@@ -9,9 +9,9 @@ FFmpeg 封装模块
 - 视频信息获取
 """
 
-import asyncio
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -23,18 +23,20 @@ class FFmpegError(VideoProcessingException):
     pass
 
 
-async def run_ffmpeg(
+def run_ffmpeg(
     args: list[str],
     timeout: int = 3600,
     check: bool = True,
+    use_ffprobe: bool = False,
 ) -> tuple[int, str, str]:
     """
-    执行 FFmpeg 命令
+    执行 FFmpeg/FFprobe 命令
 
     Args:
         args: FFmpeg 命令参数列表
         timeout: 超时时间 (秒)
         check: 是否检查退出码
+        use_ffprobe: 是否使用 ffprobe 而不是 ffmpeg
 
     Returns:
         (exit_code, stdout, stderr)
@@ -42,34 +44,43 @@ async def run_ffmpeg(
     Raises:
         FFmpegError: FFmpeg 执行失败
     """
-    cmd = ["ffmpeg"] + args
+    from core.logging import setup_logging
+    logger = setup_logging()
 
-    process = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    cmd = ["ffprobe" if use_ffprobe else "ffmpeg"] + args
+    logger.info(f"Running {'ffprobe' if use_ffprobe else 'ffmpeg'} with args: {args[:3]}... (total {len(args)} args)")
 
     try:
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(),
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
             timeout=timeout,
         )
 
-        if check and process.returncode != 0:
+        logger.info(f"{'FFprobe' if use_ffprobe else 'FFmpeg'} exited with code {result.returncode}")
+
+        # 安全地解码 stdout 和 stderr (处理 None 情况)
+        stdout = result.stdout.decode("utf-8", errors="ignore") if result.stdout is not None else ""
+        stderr = result.stderr.decode("utf-8", errors="ignore") if result.stderr is not None else ""
+
+        if check and result.returncode != 0:
             raise FFmpegError(
-                f"FFmpeg failed with code {process.returncode}: {stderr.decode()}"
+                f"{'FFprobe' if use_ffprobe else 'FFmpeg'} failed with code {result.returncode}: {stderr}"
             )
 
-        return process.returncode, stdout.decode(), stderr.decode()
+        return result.returncode, stdout, stderr
 
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
+    except subprocess.TimeoutExpired:
         raise FFmpegError(f"FFmpeg timeout after {timeout} seconds")
+    except FileNotFoundError:
+        exe_name = "ffprobe" if use_ffprobe else "ffmpeg"
+        raise FFmpegError(f"{exe_name} not found. Please ensure FFmpeg is installed and in PATH.")
+    except Exception as e:
+        logger.error(f"Exception in run_ffmpeg: {type(e).__name__}: {e}")
+        raise FFmpegError(f"Unexpected error running {'ffprobe' if use_ffprobe else 'ffmpeg'}: {e}")
 
 
-async def extract_audio(
+def extract_audio(
     video_path: str,
     output_path: str,
     codec: str = "libmp3lame",
@@ -101,11 +112,11 @@ async def extract_audio(
 
     args.extend(["-y", output_path])
 
-    await run_ffmpeg(args)
+    run_ffmpeg(args)
     return output_path
 
 
-async def extract_frames(
+def extract_frames(
     video_path: str,
     output_dir: str,
     pattern: str = "frame_%05d.jpg",
@@ -113,43 +124,64 @@ async def extract_frames(
     quality: int = 2,
 ) -> list[str]:
     """
-    提取关键帧 (基于场景变化)
+    提取关键帧 [V2 - FIXED] (基于固定帧率或场景变化)
 
     Args:
         video_path: 视频文件路径
         output_dir: 输出目录
         pattern: 文件名模式
-        fps: 帧率 (可选，默认使用原视频 fps)
+        fps: 帧率 (可选，如果指定则使用固定间隔采样，否则使用场景检测)
         quality: JPEG 质量 (1-31)
 
     Returns:
-        提取的帧文件路径列表
+        提取的帧文件路径列表 (字符串列表)
 
     Raises:
         FFmpegError: 提取失败
     """
+    from core.logging import setup_logging
+    logger = setup_logging()
+
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     output_pattern = str(Path(output_dir) / pattern)
 
-    args = [
-        "-i", video_path,
-        "-vf", "select='gt(scene,0.3)'",  # 场景变化阈值
-        "-vsync", "vfr",  # 可变帧率
-        "-qscale:v", str(quality),
-    ]
+    args = ["-i", video_path]
 
-    if fps:
-        args.extend(["-r", str(fps)])
+    # 如果指定了 fps，使用固定帧率采样
+    if fps is not None:
+        # 确保 fps 是数值类型
+        try:
+            fps_value = float(fps)
+        except (ValueError, TypeError):
+            logger.warning(f"无效的 fps 值: {fps}, 使用默认值 0.2")
+            fps_value = 0.2
+
+        args.extend([
+            "-vf", f"fps={fps_value}",
+            "-qscale:v", str(quality),
+        ])
+    else:
+        # 使用场景检测
+        args.extend([
+            "-vf", "select='gt(scene,0.3)'",  # 场景变化阈值
+            "-vsync", "vfr",  # 可变帧率
+            "-qscale:v", str(quality),
+        ])
 
     args.extend(["-y", output_pattern])
 
-    await run_ffmpeg(args)
+    logger.info(f"Extracting frames with fps={fps}, pattern={pattern}")
+    run_ffmpeg(args)
 
-    # 返回提取的文件列表
-    return sorted(Path(output_dir).glob(pattern))
+    # 返回提取的文件列表 (转换为字符串列表)
+    frame_files = sorted(Path(output_dir).glob(pattern.replace("%05d", "*")))
+    result = [str(f) for f in frame_files]
+
+    logger.info(f"Extracted {len(result)} frames")
+    return result
 
 
-async def concat_videos(
+def concat_videos(
     video_list: list[str],
     output_path: str,
     method: str = "concat",
@@ -172,10 +204,12 @@ async def concat_videos(
         # 使用 concat 协议
         # 创建临时文件列表
         list_file = Path(output_path).with_suffix(".txt")
-        with open(list_file, "w") as f:
+        with open(list_file, "w", encoding="utf-8") as f:
             for video in video_list:
                 video_path = Path(video).resolve()
-                f.write(f"file '{video_path}'\n")
+                # 在 Windows 上需要转义反斜杠
+                video_str = str(video_path).replace("\\", "/")
+                f.write(f"file '{video_str}'\n")
 
         args = [
             "-f", "concat",
@@ -186,7 +220,7 @@ async def concat_videos(
         ]
 
         try:
-            await run_ffmpeg(args)
+            run_ffmpeg(args)
         finally:
             list_file.unlink(missing_ok=True)
 
@@ -202,15 +236,16 @@ async def concat_videos(
 
         args = inputs + [
             "-filter_complex", filter_complex,
+            "-map", "[out]",
             "-y", output_path,
         ]
 
-        await run_ffmpeg(args)
+        run_ffmpeg(args)
 
     return output_path
 
 
-async def merge_audio_video(
+def merge_audio_video(
     video_path: str,
     audio_path: str,
     output_path: str,
@@ -240,11 +275,11 @@ async def merge_audio_video(
         "-y", output_path,
     ]
 
-    await run_ffmpeg(args)
+    run_ffmpeg(args)
     return output_path
 
 
-async def cut_video(
+def cut_video(
     video_path: str,
     output_path: str,
     start_time: float,
@@ -280,11 +315,11 @@ async def cut_video(
 
     args.extend(["-y", output_path])
 
-    await run_ffmpeg(args)
+    run_ffmpeg(args)
     return output_path
 
 
-async def get_video_info(video_path: str) -> dict[str, Any]:
+def get_video_info(video_path: str) -> dict[str, Any]:
     """
     获取视频信息
 
@@ -292,48 +327,92 @@ async def get_video_info(video_path: str) -> dict[str, Any]:
         video_path: 视频文件路径
 
     Returns:
-        视频信息字典
+        视频信息字典，所有数值字段都是正确的类型 (int/float)
 
     Raises:
         FFmpegError: 获取信息失败
     """
+    from core.logging import setup_logging
+    logger = setup_logging()
+
+    logger.info(f"Getting video info for: {video_path}")
+
     # 使用 ffprobe 获取视频信息
     args = [
         "-v", "error",
+        "-select_streams", "v:0",  # 选择第一个视频流
         "-show_entries",
-        "stream=0:width,height,duration,r_frame_rate,codec_name",
+        "stream=width,height,duration,r_frame_rate,codec_name,nb_frames",
         "-show_entries",
-        "format=duration:format",
+        "format=duration",
         "-of", "json",
         video_path,
     ]
 
-    _, stdout, _ = await run_ffmpeg(args, check=False)
+    exit_code, stdout, stderr = run_ffmpeg(args, check=False, use_ffprobe=True)
+
+    # 检查 ffprobe 是否成功
+    if exit_code != 0:
+        raise FFmpegError(f"ffprobe failed (exit code {exit_code}): {stderr}")
+
+    # 检查输出是否为空
+    if not stdout or not stdout.strip():
+        raise FFmpegError(f"ffprobe returned empty output: {stderr}")
 
     try:
         info = json.loads(stdout)
-    except json.JSONDecodeError:
-        raise FFmpegError(f"Failed to parse video info: {stdout}")
+    except json.JSONDecodeError as e:
+        raise FFmpegError(f"Failed to parse video info JSON: {e}\nstdout: {stdout}\nstderr: {stderr}")
 
     # 解析信息
     stream = info.get("streams", [{}])[0]
     format_info = info.get("format", {})
 
-    duration = float(format_info.get("duration", 0))
-    if duration == 0 and stream.get("duration"):
-        duration = float(stream["duration"])
+    # 安全地解析 duration
+    duration = 0.0
+    duration_str = format_info.get("duration") or stream.get("duration") or "0"
+    try:
+        duration = float(duration_str)
+    except (ValueError, TypeError):
+        logger.warning(f"无法解析 duration: {duration_str}, 使用默认值 0.0")
+
+    # 安全地解析帧率
+    r_frame_rate = stream.get("r_frame_rate", "25/1")
+    fps = 25.0  # 默认值
+    try:
+        if isinstance(r_frame_rate, str) and "/" in r_frame_rate:
+            parts = r_frame_rate.split("/")
+            if len(parts) == 2:
+                numerator = float(parts[0])
+                denominator = float(parts[1])
+                fps = numerator / denominator if denominator > 0 else 25.0
+        else:
+            fps = float(r_frame_rate)
+    except (ValueError, TypeError, ZeroDivisionError) as e:
+        logger.warning(f"无法解析帧率 '{r_frame_rate}': {e}, 使用默认值 25.0")
+
+    # 安全地解析宽高
+    try:
+        width = int(stream.get("width", 1920))
+    except (ValueError, TypeError):
+        width = 1920
+
+    try:
+        height = int(stream.get("height", 1080))
+    except (ValueError, TypeError):
+        height = 1080
 
     return {
-        "width": int(stream.get("width", 0)),
-        "height": int(stream.get("height", 0)),
-        "duration": duration,
-        "fps": eval(stream.get("r_frame_rate", "25")),
+        "width": width,
+        "height": height,
+        "duration": duration,  # 确保是 float
+        "fps": fps,  # 确保是 float
         "codec": stream.get("codec_name", "unknown"),
         "path": video_path,
     }
 
 
-async def resize_video(
+def resize_video(
     video_path: str,
     output_path: str,
     width: int | None = None,
@@ -369,11 +448,11 @@ async def resize_video(
         "-y", output_path,
     ]
 
-    await run_ffmpeg(args)
+    run_ffmpeg(args)
     return output_path
 
 
-async def convert_format(
+def convert_format(
     input_path: str,
     output_path: str,
     video_codec: str = "libx264",
@@ -402,7 +481,7 @@ async def convert_format(
         "-y", output_path,
     ]
 
-    await run_ffmpeg(args)
+    run_ffmpeg(args)
     return output_path
 
 
@@ -428,7 +507,6 @@ def get_ffmpeg_version() -> str | None:
         FFmpeg 版本字符串，如果未安装返回 None
     """
     try:
-        import subprocess
         result = subprocess.run(
             ["ffmpeg", "-version"],
             capture_output=True,

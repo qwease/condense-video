@@ -19,7 +19,9 @@ from redis.backoff import ExponentialBackoff
 from core.config import settings
 from core.exceptions import StorageException
 
+import logging
 
+logger = logging.getLogger(__name__)
 # Redis 重试策略
 # ExponentialBackoff doesn't take 'attempts' - the Retry count is the second arg
 retry = Retry(ExponentialBackoff(), 3)
@@ -93,6 +95,10 @@ def set_task_status(
         error: 错误信息 (失败时)
     """
     client = get_redis()
+    if client is None:
+        logger.warning(f"⚠️ Redis 未连接，跳过更新任务状态 (status: {status})")
+        return
+
     key = f"task:{task_id}"
     now = datetime.now().isoformat()
 
@@ -129,6 +135,10 @@ def get_task_status(task_id: str) -> dict[str, Any] | None:
         任务状态字典，如果任务不存在返回 None
     """
     client = get_redis()
+    if client is None:
+        logger.warning(f"⚠️ Redis 未连接，无法获取任务状态 (task_id: {task_id})")
+        return None
+        
     data = client.hgetall(f"task:{task_id}")
 
     if not data:
@@ -169,6 +179,11 @@ def update_progress(
         data: 额外的进度数据
     """
     client = get_redis()
+    if client is None:
+        # 在没有 Redis 的情况下，只打印日志
+        logger.info(f"[{step}] 进度: {progress*100:.1f}% - {message}")
+        return
+    
     key = f"task-progress:{task_id}"
 
     payload = {
@@ -234,8 +249,15 @@ def save_result(task_id: str, result: dict) -> None:
         result: 结果数据
     """
     client = get_redis()
-    key = f"task-result:{task_id}"
-    client.set(key, json.dumps(result, ensure_ascii=False), ex=settings.redis_result_ttl)
+    if client is None:
+        logger.warning(f"⚠️ Redis 未连接，跳过保存任务结果 (task_id: {task_id})")
+        return
+        
+    try:
+        key = f"task-result:{task_id}"
+        client.set(key, json.dumps(result, ensure_ascii=False), ex=settings.redis_result_ttl)
+    except Exception as e:
+        logger.error(f"保存结果到 Redis 失败: {e}")
 
 
 def get_result(task_id: str) -> dict | None:

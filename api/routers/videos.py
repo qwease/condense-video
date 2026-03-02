@@ -129,16 +129,19 @@ async def process_video(
                 tmp.write(content)
                 video_path = tmp.name
 
-            # 使用本地文件工作流
-            process_video_workflow(
-                video_path=video_path,
-                **workflow_params,
+            # 使用本地文件工作流 - 调用 Celery 任务
+            # workflow_params 已包含 task_id 等参数，只需添加 video_path
+            all_params = {**workflow_params, "video_path": video_path}
+            process_video_workflow.apply_async(
+                kwargs=all_params,
+                task_id=task_id,
             )
         else:
-            # 使用 URL 下载工作流
-            process_video_workflow(
-                video_url=video_url,
-                **workflow_params,
+            # 使用 URL 下载工作流 - 调用 Celery 任务
+            all_params = {**workflow_params, "video_url": video_url}
+            process_video_workflow.apply_async(
+                kwargs=all_params,
+                task_id=task_id,
             )
 
         # 初始化任务状态
@@ -235,16 +238,12 @@ async def get_video_result(video_id: str) -> VideoResultResponse:
 
 @router.get("/{video_id}/download", summary="下载处理后的视频")
 async def download_video_file(
-    video_id: str,
-    type: str = Query(default="tts", description="视频类型: condensed (浓缩视频) | tts (带 TTS 的浓缩视频)"),
+    video_id: str
 ):
     """
     下载处理后的视频文件
 
     - **video_id**: 视频 ID
-    - **type**: 下载类型
-      - `condensed`: 纯浓缩视频
-      - `tts`: 带 TTS 配音的浓缩视频 (默认)
     """
     from services.redis_client import get_result, get_task_status
 
@@ -282,22 +281,7 @@ async def download_video_file(
     # 确定文件路径
     files = result_data.get("files", {})
 
-    if type == "tts":
-        file_path = files.get("tts_audio")
-    elif type == "condensed":
-        # TODO: 实现纯浓缩视频生成
-        file_path = files.get("condensed_video")
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=ErrorResponse(
-                error={
-                    "code": ErrorCode.INVALID_REQUEST,
-                    "message": f"Invalid type: {type}",
-                    "details": {},
-                }
-            ).model_dump(),
-        )
+    file_path = files.get("condensed_video")
 
     if not file_path or not Path(file_path).exists():
         raise HTTPException(
@@ -426,7 +410,23 @@ async def download_file(
 
 
 def _build_process_result(result_data: dict) -> VideoProcessResult:
-    """从 Redis 结果数据构建 VideoProcessResult"""
+    """从 Redis 结果数据构建 VideoProcessResult
+
+    映射 finalize_processing 中存储的文件结构:
+    - transcript: transcript.json
+    - classification: classification.json / classification.md
+    - condensed: condensed.json
+    - key_points: key_points.md
+    - outline: outline.json / outline.md
+    - summary: summary.md
+    - segments: segments.json
+    - sentences: sentences.txt
+    - subtitles_words: subtitles_words.json
+    - tts_audio: tts_audio.mp3
+    - condensed_video: condensed_course.mp4
+    - ppt_frames: images (目录)
+    - ppt_ocr: ocr_result.json
+    """
     from api.schemas.responses import (
         ChapterInfo,
         ScriptFileInfo,
@@ -450,24 +450,27 @@ def _build_process_result(result_data: dict) -> VideoProcessResult:
     # 构建步骤文件信息
     steps = StepFileInfo(
         transcribe={
-            "audio_url": files.get("audio"),
             "transcript_url": files.get("transcript"),
+            "sentences_url": files.get("sentences"),
+            "subtitles_words_url": files.get("subtitles_words"),
         },
         ppt={
             "frames_dir": files.get("ppt_frames"),
             "ocr_result_url": files.get("ppt_ocr"),
         },
         audio={
-            "tts_segments_dir": None,
-            "audio_timing_url": None,
             "tts_audio_url": files.get("tts_audio"),
+            "condensed_text_url": files.get("condensed"),
+        },
+        video={
+            "condensed_video_url": files.get("condensed_video"),
         },
     )
 
     # 统计信息
     statistics = Statistics(
-        duration=stats.get("duration"),
-        sentences=stats.get("statistics", {}).get("sentences"),
+        duration=stats.get("total_duration"),
+        sentences=stats.get("statistics"),
         chapters_count=stats.get("chapter_count"),
     )
 
@@ -488,14 +491,14 @@ def _build_process_result(result_data: dict) -> VideoProcessResult:
                             duration=ch.get("duration", 0.0),
                             core_sentences=ch.get("core_sentences", 0),
                             keywords=ch.get("keywords", []),
-                            key_formulas=ch.get("key_formulas", []),
+                            key_formulas=ch.get("keyFormulas", []),
                         )
                     )
         except Exception:
             pass
 
     return VideoProcessResult(
-        condensed_video_url=None,  # TODO: 实现视频剪辑后添加
+        condensed_video_url=files.get("condensed_video"),
         condensed_video_tts_url=files.get("tts_audio"),
         script=script,
         steps=steps,

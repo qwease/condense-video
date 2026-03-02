@@ -28,8 +28,7 @@ FILLER_WORDS = {
 # 课堂互动关键词
 INTERACTION_KEYWORDS = {
     "举手", "谁来说", "谁来回答", "谁知道", "有没有",
-    "提问", "问题", "回答", "说一下", "来讲讲",
-    "作业", "考试", "分数", "成绩", "交作业",
+    "提问", "问题", "回答", "说一下", "来讲讲", "交作业",
 }
 
 # 过渡语关键词
@@ -549,6 +548,11 @@ def truncate_for_tts(
     """
     将文本截断为适合 TTS 的片段
 
+    兼容 JS 版本 splitTextForTTS 的逻辑：
+    - 使用正则表达式按句子分割（保留分隔符）
+    - 处理超长句子的强制分割
+    - 防御性检查确保没有片段超限
+
     Args:
         text: 输入文本
         max_length: 单段最大长度
@@ -561,30 +565,48 @@ def truncate_for_tts(
         return [text]
 
     if split_at_sentence:
-        # 按句子分割
-        sentences = split_by_punctuation(text)
+        # 使用正则表达式按句子分割（与 JS 一致）
+        # JS: const sentences = text.match(/[^。！？.!?]+[。！？.!?]+/g) || [text];
+        sentence_pattern = re.compile(r'[^。！？.!?]+[。！？.!?]+')
+        sentences = sentence_pattern.findall(text)
+
+        # 如果没有匹配到句子，使用整个文本
+        if not sentences:
+            sentences = [text]
 
         chunks = []
         current = ""
 
         for sentence in sentences:
-            if len(current) + len(sentence) <= max_length:
-                current += sentence
-            else:
+            # 如果单个句子本身超过 maxLength，强制按字符分割
+            if len(sentence) > max_length:
+                # 先保存当前累积的内容
                 if current:
-                    chunks.append(current)
-                # 如果单个句子过长，强制分割
-                if len(sentence) > max_length:
-                    for i in range(0, len(sentence), max_length):
-                        chunks.append(sentence[i:i + max_length])
+                    chunks.append(current.strip())
                     current = ""
-                else:
-                    current = sentence
+                # 强制分割长句
+                for i in range(0, len(sentence), max_length):
+                    chunks.append(sentence[i:i + max_length])
+            elif len(current) + len(sentence) > max_length:
+                chunks.append(current.strip())
+                current = sentence
+            else:
+                current += sentence
 
-        if current:
-            chunks.append(current)
+        if current.strip():
+            chunks.append(current.strip())
 
-        return chunks
+        # 防御性检查：确保没有段落超限（与 JS 一致）
+        safe_chunks = []
+        for chunk in chunks:
+            if len(chunk) > max_length:
+                # 如果还是超限，强制分割
+                for i in range(0, len(chunk), max_length):
+                    safe_chunks.append(chunk[i:i + max_length])
+            else:
+                safe_chunks.append(chunk)
+
+        return safe_chunks
     else:
         # 强制按长度分割
         return [text[i:i + max_length] for i in range(0, len(text), max_length)]

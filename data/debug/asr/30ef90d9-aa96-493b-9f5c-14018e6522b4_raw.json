@@ -1,0 +1,25 @@
+{
+  "request_id": "4be7cb07-c5e3-4c99-9f38-49f718d3ff31",
+  "output": {
+    "task_id": "30ef90d9-aa96-493b-9f5c-14018e6522b4",
+    "task_status": "SUCCEEDED",
+    "submit_time": "2026-03-02 09:00:31.259",
+    "scheduled_time": "2026-03-02 09:00:31.281",
+    "end_time": "2026-03-02 09:01:23.517",
+    "results": [
+      {
+        "file_url": "https://h.uguu.se/PggkCKLK.mp3",
+        "transcription_url": "https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/prod/paraformer-v2/20260302/09%3A01/265985dc-1389-427a-ba1f-98f138220a40-1.json?Expires=1772499683&OSSAccessKeyId=LTAI5tQZd8AEcZX6KZV4G8qL&Signature=GxgVFub5IhMlcs%2B2osjx3jP6dl0%3D",
+        "subtask_status": "SUCCEEDED"
+      }
+    ],
+    "task_metrics": {
+      "TOTAL": 1,
+      "SUCCEEDED": 1,
+      "FAILED": 0
+    }
+  },
+  "usage": {
+    "duration": 4596
+  }
+}

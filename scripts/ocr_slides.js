@@ -430,7 +430,7 @@ async function main() {
 
   // 统计
   const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
-  console.log('\n✅ OCR 完成！');
+  console.log('OCR 完成！');
   console.log(`   成功: ${results.slides.length} 帧`);
   console.log(`   失败: ${results.errors.length} 帧`);
   console.log(`   耗时: ${totalTime} 秒`);

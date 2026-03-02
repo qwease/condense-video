@@ -25,3 +25,5 @@ loguru>=0.7
 
 # 重试工具
 tenacity>=8.2
+
+nest-asyncio>=1.6.0

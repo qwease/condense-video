@@ -20,6 +20,14 @@ from tenacity import (
     retry_if_exception_type,
 )
 
+import json
+import re
+import logging
+import httpx
+from pathlib import Path
+import base64
+import mimetypes
+
 from core.config import settings
 from core.exceptions import ASRException, LLMException, OCRException, TTSException
 
@@ -142,6 +150,9 @@ class DashScopeClient:
         Returns:
             转录结果
         """
+        
+
+        logger = logging.getLogger(__name__)
         start_time = time.time()
 
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -162,7 +173,24 @@ class DashScopeClient:
                 status = output.get("task_status")
 
                 if status == "SUCCEEDED":
-                    return self._convert_asr_result(output)
+                    # 保存原始响应以便调试
+                    debug_dir = Path("data/debug/asr")
+                    debug_dir.mkdir(parents=True, exist_ok=True)
+                    debug_file = debug_dir / f"{task_id}_raw.json"
+                    with open(debug_file, "w", encoding="utf-8") as f:
+                        json.dump(result, f, ensure_ascii=False, indent=2)
+
+                    logger.info(f"ASR task {task_id} succeeded, output keys: {list(output.keys())}")
+                    logger.info(f"results: {output.get('results', 'N/A')}")
+                    logger.info(f"transcripts: {output.get('transcripts', 'N/A')}")
+
+                    converted = self._convert_asr_result(output)
+                    # 同时保存转换后的结果
+                    converted_file = debug_dir / f"{task_id}_converted.json"
+                    with open(converted_file, "w", encoding="utf-8") as f:
+                        json.dump(converted, f, ensure_ascii=False, indent=2)
+
+                    return converted
                 elif status == "FAILED":
                     raise ASRException(f"ASR task failed: {output}")
 
@@ -178,23 +206,50 @@ class DashScopeClient:
         Returns:
             兼容格式的转录结果
         """
+        logger = logging.getLogger(__name__)
+
         result = {"utterances": []}
 
-        # 检查是否有 results
+        # 记录输出结构用于调试
+        logger.info(f"ASR output keys: {list(output.keys())}")
+        logger.info(f"results count: {len(output.get('results', []))}")
+        logger.info(f"transcripts count: {len(output.get('transcripts', []))}")
+
+        # 检查是否有 results 和 transcription_url[Any]
         results = output.get("results", [])
-        if results and results[0].get("transcription_url"):
-            # 需要下载详细结果 (这里简化处理，实际需要下载)
-            # 由于需要额外下载，这里返回基本格式
-            pass
+        if results:
+            logger.info(f"First result keys: {list(results[0].keys()) if results[0] else 'empty'}")
+            if results[0].get("transcription_url"):
+                # 下载详细转录结果
+                transcription_url = results[0]["transcription_url"]
+                logger.info(f"Downloading transcription from: {transcription_url}")
+                try:
+                    response = httpx.get(transcription_url, timeout=60.0)
+                    response.raise_for_status()
+                    transcription = response.json()
+                    logger.info(f"Downloaded transcription keys: {list(transcription.keys())}")
+                    return self._process_transcription(transcription)
+                except Exception as e:
+                    # 下载失败，回退到直接处理
+                    logger.warning(f"Failed to download transcription: {e}, falling back to transcripts")
 
         # 处理 transcripts
         transcripts = output.get("transcripts", [])
+        logger.info(f"Processing {len(transcripts)} transcripts")
+        return self._process_transcripts(transcripts)
+
+    def _process_transcription(self, transcription: dict[str, Any]) -> dict[str, Any]:
+        """处理已下载的转录结果"""
+        result = {"utterances": []}
+
+        # 检查 transcripts 数组
+        channel_transcripts = transcription.get("transcripts", [])
 
         # 处理嵌套格式
-        if transcripts and isinstance(transcripts[0], dict) and transcripts[0].get("transcripts"):
-            transcripts = transcripts[0]["transcripts"]
+        if channel_transcripts and isinstance(channel_transcripts[0], dict) and channel_transcripts[0].get("transcripts"):
+            channel_transcripts = channel_transcripts[0]["transcripts"]
 
-        for channel in transcripts:
+        for channel in channel_transcripts:
             inner_transcripts = channel.get("transcripts", [channel])
 
             for inner in inner_transcripts:
@@ -234,6 +289,78 @@ class DashScopeClient:
 
         return result
 
+    def _process_transcripts(self, transcripts: list) -> dict[str, Any]:
+        """处理 transcripts 列表"""
+        logger = logging.getLogger(__name__)
+
+        result = {"utterances": []}
+
+        logger.info(f"_process_transcripts: received {len(transcripts)} transcripts")
+
+        # 处理嵌套格式
+        if transcripts and isinstance(transcripts[0], dict) and transcripts[0].get("transcripts"):
+            logger.info("Found nested transcripts format, extracting...")
+            transcripts = transcripts[0]["transcripts"]
+            logger.info(f"After extraction: {len(transcripts)} transcripts")
+
+        for idx, channel in enumerate(transcripts):
+            logger.info(f"Processing channel {idx}: keys = {list(channel.keys()) if isinstance(channel, dict) else type(channel)}")
+
+            # 确保 channel 是字典
+            if not isinstance(channel, dict):
+                logger.warning(f"Channel {idx} is not a dict: {type(channel)}")
+                continue
+
+            inner_transcripts = channel.get("transcripts", [channel])
+            logger.info(f"Channel {idx} has {len(inner_transcripts)} inner transcripts")
+
+            for inner_idx, inner in enumerate(inner_transcripts):
+                text = inner.get("text", "")
+                logger.info(f"  Inner {inner_idx}: text = '{text[:50] if text else '(empty)'}...'")
+
+                utterance = {
+                    "text": text,
+                    "begin_time": 0,
+                    "end_time": inner.get("content_duration_in_milliseconds", 0),
+                    "words": [],
+                }
+
+                # 处理字级别时间戳
+                sentences = inner.get("sentences", [])
+                if sentences:
+                    logger.info(f"    Found {len(sentences)} sentences")
+
+                for sentence in sentences:
+                    words = sentence.get("words", [])
+                    for word in words:
+                        utterance["words"].append(
+                            {
+                                "text": word.get("text", word.get("word", "")),
+                                "begin_time": round(word.get("begin_time", word.get("start_time", 0))),
+                                "end_time": round(word.get("end_time", 0)),
+                            }
+                        )
+
+                # 如果没有字级别时间戳，按字符拆分
+                if not utterance["words"] and utterance["text"]:
+                    chars = list(utterance["text"])
+                    char_duration = utterance["end_time"] / len(chars) if chars else 0
+                    for i, char in enumerate(chars):
+                        utterance["words"].append(
+                            {
+                                "text": char,
+                                "begin_time": round(i * char_duration),
+                                "end_time": round((i + 1) * char_duration),
+                            }
+                        )
+
+                if utterance["text"]:
+                    result["utterances"].append(utterance)
+                    logger.info(f"  Added utterance: {len(utterance['words'])} words")
+
+        logger.info(f"_process_transcripts: returning {len(result['utterances'])} utterances")
+        return result
+
     # ==================== OCR 图像识别 ====================
 
     @retry(
@@ -241,26 +368,76 @@ class DashScopeClient:
         wait=wait_exponential(multiplier=1, min=1, max=10),
         retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.ConnectError)),
     )
-    async def ocr(self, image_url: str) -> dict[str, Any]:
+    async def ocr(self, image_path: str) -> dict[str, Any]:
         """
-        OCR 图像识别
+        OCR 图像识别 - 使用 DashScope VL 模型
 
         Args:
-            image_url: 图片 URL
+            image_path: 图片文件路径（本地路径）
 
         Returns:
-            OCR 识别结果
+            OCR 识别结果，包含结构化信息
         """
+
+        # 读取图片并转为 base64
+        with open(image_path, "rb") as f:
+            image_data = f.read()
+
+        base64_image = base64.b64encode(image_data).decode()
+
+        # 判断 MIME 类型
+        mime_type = mimetypes.guess_type(image_path)[0] or "image/jpeg"
+        data_uri = f"data:{mime_type};base64,{base64_image}"
+
+        # JS 版本使用的详细 prompt
+        prompt = """请分析这张 PPT 图片，提取以下信息（JSON 格式）：
+
+1. title: PPT 标题（通常是大号字体、居中的文字）
+2. subtitles: 副标题或小节标题
+3. body: 主要内容文字（数组，每段一个元素）
+4. formulas: 公式（如有，保持原格式）
+5. keyTerms: 关键术语或专业词汇
+
+**重要**：JSON 中的反斜杠必须转义为双反斜杠（\\\\）。
+例如：LaTeX 公式 $ \\omega $ 应写为 "$ \\\\omega $"
+
+请直接返回 JSON 结构体，不要有其他说明文字和Markdown 标志。
+
+格式：
+{
+  "title": "PPT标题",
+  "subtitles": ["副标题1", "副标题2"],
+  "body": ["正文段落1", "正文段落2"],
+  "formulas": ["公式1", "公式2"],
+  "keyTerms": ["术语1", "术语2"]
+}"""
+
+        # 修复：按照官方文档格式
         body = {
             "model": settings.dashscope_ocr_model,
-            "input": {
-                "image": image_url,
-            },
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": data_uri
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": prompt
+                        }
+                    ]
+                }
+            ],
+            "enable_thinking": False,
         }
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                f"{DASHSCOPE_BASE}/api/v1/services/vd/image/understanding",
+                f"{DASHSCOPE_BASE}/compatible-mode/v1/chat/completions",
                 headers=self._get_headers(),
                 json=body,
             )
@@ -269,14 +446,69 @@ class DashScopeClient:
                 result = response.json()
                 raise OCRException(f"OCR request failed: {result}")
 
-            return response.json()
+            return self._parse_ocr_result(response.json())
 
-    async def ocr_batch(self, image_urls: list[str], concurrency: int = 5) -> list[dict[str, Any]]:
+    def _parse_ocr_result(self, response: dict[str, Any]) -> dict[str, Any]:
+        """解析 OCR 结果"""
+        try:
+            content = response["choices"][0]["message"]["content"]
+
+            # 移除 markdown 代码块标记
+            json_match = re.search(r"```json\s*([\s\S]*?)\s*```", content)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                # 尝试直接查找 JSON 对象
+                json_match = re.search(r'\{[\s\S]*\}', content)
+                if json_match:
+                    json_str = json_match.group(0)
+                else:
+                    # 无法解析，使用原始文本
+                    json_str = content
+
+            try:
+                parsed = json.loads(json_str)
+                return {
+                    "title": parsed.get("title", ""),
+                    "subtitles": parsed.get("subtitles", []),
+                    "body": parsed.get("body", []),
+                    "formulas": parsed.get("formulas", []),
+                    "keyTerms": parsed.get("keyTerms", []),
+                    "rawText": content,
+                    "parseError": False
+                }
+            except json.JSONDecodeError:
+                # JSON 解析失败，返回原始文本
+                return {
+                    "title": "",
+                    "subtitles": [],
+                    "body": [content],
+                    "formulas": [],
+                    "keyTerms": [],
+                    "rawText": content,
+                    "parseError": True
+                }
+        except Exception as e:
+            return {
+                "title": "",
+                "subtitles": [],
+                "body": [],
+                "formulas": [],
+                "keyTerms": [],
+                "rawText": "",
+                "error": str(e)
+            }
+
+    async def ocr_batch(
+        self,
+        image_paths: list[str],
+        concurrency: int = 5
+    ) -> list[dict[str, Any]]:
         """
-        批量 OCR 识别
+        批量 OCR 识别 - 处理本地图片文件
 
         Args:
-            image_urls: 图片 URL 列表
+            image_paths: 图片文件路径列表
             concurrency: 并发数
 
         Returns:
@@ -284,11 +516,14 @@ class DashScopeClient:
         """
         semaphore = asyncio.Semaphore(concurrency)
 
-        async def process_one(url: str) -> dict[str, Any]:
+        async def process_one(path: str) -> dict[str, Any]:
             async with semaphore:
-                return await self.ocr(url)
+                try:
+                    return await self.ocr(path)
+                except Exception as e:
+                    return {"error": str(e), "path": path}
 
-        tasks = [process_one(url) for url in image_urls]
+        tasks = [process_one(path) for path in image_paths]
         return await asyncio.gather(*tasks)
 
     # ==================== LLM 文本生成 ====================
@@ -360,43 +595,89 @@ class DashScopeClient:
         Returns:
             分类结果列表
         """
-        # 构建 prompt
+        
+
+        # 构建 PPT 上下文
         context_str = ""
         if ppt_context:
-            context_str = "\n\nPPT 内容:\n" + "\n".join(
-                [f"- {p.get('title', '')}: {p.get('text', '')}" for p in ppt_context[:5]]
-            )
+            ppt_items = []
+            for p in ppt_context[:5]:
+                title = p.get('title', '')
+                content = p.get('text', '') or p.get('content', '')
+                if title or content:
+                    ppt_items.append(f"- {title}: {content}")
+            if ppt_items:
+                context_str = "\n\n## PPT 上下文\n\n" + "\n".join(ppt_items)
 
         results = []
 
         for i in range(0, len(sentences), batch_size):
             batch = sentences[i : i + batch_size]
 
-            batch_text = "\n".join([f"{i+1}. {s['text']}" for i, s in enumerate(batch)])
+            batch_text = "\n".join([f"{j+1}. {s['text']}" for j, s in enumerate(batch)])
 
-            prompt = f"""请对以下句子进行分类，判断每个句子属于哪一类：
+            # 使用规则文件中的详细分类标准
+            prompt = f"""你是一个课程内容分类助手。请根据以下规则对每个句子进行分类。
 
-标签定义：
-- core: 核心知识 (定义、公式、定理、重要概念)
-- explain: 解释说明 (对核心内容的解释、举例)
-- interact: 课堂互动 (师生互动、提问、回答)
-- chat: 闲聊跑题 (与课程无关的内容)
-- transition: 过渡语 (承上启下的过渡语句)
+## 分类标签
 
-{context_str}
+### 1. core (核心知识) - 必须保留
+- 定义概念：包含"定义是"、"公式是"、"定理是"
+- 公式定理：包含"等于"、"称为"、"记作"、数学表达式
+- 重要结论：关键概念首次出现
+- 核心原理：步骤/流程的核心描述
 
-句子：
+### 2. explain (解释说明) - 可选保留
+- 举例说明：包含"比如说"、"举个例子"、"换句话说"
+- 类比解释：包含"意思是"、"也就是说"
+- 补充细节：对前文内容的进一步解释
+- 具体案例分析
+
+### 3. interact (课堂互动) - 建议删除
+- 师生问答：包含人名（学生名）、"谁来说"、"你来回答"
+- 期待回应：包含"对不对"、"是不是"、"听懂了吗"
+- 学生发言：学生回答问题、课堂讨论
+
+### 4. chat (闲聊跑题) - 必须删除
+- 课程无关：与当前知识点无关的内容
+- 跑题内容：个人经历、轶事（非教学目的）
+- 课堂管理：作业、考试、考勤、纪律相关
+- 无意义内容：纯语气词、"啊"、"嗯"、"呃"、"哈哈哈哈"
+
+### 5. transition (过渡语) - 可以删除
+- 承上启下：纯过渡词"那么"、"接下来"、"下面"
+- 填充语句："所以说呢"、"这个呢就是说"
+- 重复强调：无实质内容的"这个很重要"、"一定要记住"
+
+## 分类优先级
+
+当一句话可能属于多个类别时，按以下优先级判断：
+```
+core > explain > interact > chat > transition
+```
+
+## 边界情况处理原则
+
+**宁可保留，不要误删**：
+- 不确定的内容 → explain（可选保留）
+- 疑似核心知识 → core（保留）
+- 混合内容按主体内容分类{context_str}
+
+## 待分类句子
+
 {batch_text}
 
-请返回 JSON 格式，每个句子包含：
-- idx: 句子序号
-- label: 分类标签
-- confidence: 置信度 (0-1)
+## 输出格式
 
-格式：
+请返回 JSON 格式，每个句子包含：
+- idx: 句子序号（从0开始）
+- label: 分类标签 (core/explain/interact/chat/transition)
+- confidence: 置信度 (0-1)
+- reason: 简短的分类理由
+
 ```json
 [
-  {{"idx": 0, "label": "core", "confidence": 0.95}},
+  {{"idx": 0, "label": "core", "confidence": 0.95, "reason": "包含定义性陈述"}},
   ...
 ]
 ```"""
@@ -405,27 +686,59 @@ class DashScopeClient:
                 response_text = await self.generate_text(prompt, max_tokens=4096)
 
                 # 解析 JSON 响应
-                import json
-                import re
-
-                json_match = re.search(r"```json\n(.*?)\n```", response_text, re.DOTALL)
-                if json_match:
-                    response_text = json_match.group(1)
+                code_block_match = re.search(r"```json\n(.*?)\n```", response_text, re.DOTALL)
+                if code_block_match:
+                    json_text = code_block_match.group(1)
                 else:
                     # 尝试直接解析
-                    json_match = re.search(r"\[.*\]", response_text, re.DOTALL)
-                    if json_match:
-                        response_text = json_match.group(0)
+                    array_match = re.search(r"\[.*\]", response_text, re.DOTALL)
+                    if array_match:
+                        json_text = array_match.group(0)
+                    else:
+                        json_text = response_text
 
-                batch_results = json.loads(response_text)
-                results.extend(batch_results)
+                batch_results = json.loads(json_text)
+                # 将分类结果与原始句子数据合并，保留原始字段 (text, begin_time, end_time 等)
+                # 使用 idx 字段来匹配原始句子，而不是数组索引
+                # 参考 scripts/classify_content.js:258-270 的实现
+                for result_item in batch_results:
+                    idx = result_item.get("idx")
+                    if idx is not None:
+                        # 找到对应的原始句子
+                        original_sentence = next((s for s in batch if s.get("idx") == idx), None)
+                        if original_sentence:
+                            merged_result = {
+                                **original_sentence,  # 保留原始句子的所有字段
+                                "label": result_item.get("label", "explain"),
+                                "confidence": result_item.get("confidence", 0.5),
+                                "reason": result_item.get("reason", ""),
+                            }
+                            results.append(merged_result)
 
-            except (json.JSONDecodeError, KeyError) as e:
-                # 失败时默认为 explain
-                for j, _ in enumerate(batch):
-                    results.append(
-                        {"idx": i + j, "label": "explain", "confidence": 0.5}
-                    )
+            except json.JSONDecodeError as e:
+                logging.getLogger(__name__).warning(
+                    f"JSON 解析失败 (batch {i}): {e}, 默认标记为 explain"
+                )
+                # 失败时默认为 explain，但保留原始句子数据
+                for sentence in batch:
+                    results.append({
+                        **sentence,
+                        "label": "explain",
+                        "confidence": 0.5,
+                        "reason": f"JSON 解析失败: {e}",
+                    })
+            except Exception as e:
+                logging.getLogger(__name__).warning(
+                    f"分类请求失败 (batch {i}): {e}, 默认标记为 explain"
+                )
+                # 网络错误等其他异常，也降级处理
+                for sentence in batch:
+                    results.append({
+                        **sentence,
+                        "label": "explain",
+                        "confidence": 0.5,
+                        "reason": f"分类请求失败: {e}",
+                    })
 
         return results
 
@@ -481,7 +794,7 @@ class DashScopeClient:
 
             # 如果有 Base64 数据
             if output.get("audio", {}).get("data"):
-                import base64
+                
                 return base64.b64decode(output["audio"]["data"])
 
             raise TTSException(f"Unexpected TTS response format: {result}")
@@ -490,26 +803,44 @@ class DashScopeClient:
         self,
         texts: list[str],
         voice: str | None = None,
+        model: str | None = None,
+        output_dir: str | None = None,
         concurrency: int = 3,
-    ) -> list[bytes]:
+    ) -> list[str]:
         """
         批量 TTS 合成
 
         Args:
             texts: 文本列表
             voice: 音色
+            model: 模型名称（可选）
+            output_dir: 输出目录（可选，如果指定则保存到文件）
             concurrency: 并发数
 
         Returns:
-            音频数据列表
+            如果指定 output_dir，返回音频文件路径列表；否则返回音频数据列表
         """
+
         semaphore = asyncio.Semaphore(concurrency)
 
-        async def process_one(text: str) -> bytes:
+        async def process_one(index: int, text: str) -> bytes | str:
             async with semaphore:
-                return await self.tts(text, voice)
+                audio_data = await self.tts(text, voice, model)
 
-        tasks = [process_one(text) for text in texts]
+                # 如果指定了输出目录，保存到文件
+                if output_dir:
+                    output_path = Path(output_dir)
+                    output_path.mkdir(parents=True, exist_ok=True)
+                    audio_file = output_path / f"segment_{index:05d}.mp3"
+
+                    with open(audio_file, "wb") as f:
+                        f.write(audio_data)
+
+                    return str(audio_file)
+
+                return audio_data
+
+        tasks = [process_one(i, text) for i, text in enumerate(texts)]
         return await asyncio.gather(*tasks)
 
 

@@ -77,7 +77,7 @@ class AppConfig(BaseSettings):
     )
 
     # ============== 存储配置 ==============
-    storage_backend: Literal["local", "minio", "s3"] = Field(
+    storage_backend: Literal["local", "minio", "s3", "uuguu"] = Field(
         default="local",
         alias="STORAGE_BACKEND",
         description="存储后端类型"
@@ -126,7 +126,6 @@ class AppConfig(BaseSettings):
     )
 
     # ============== OCR 配置 ==============
-    ocr_provider: str = Field(default="dashscope", alias="OCR_PROVIDER", description="OCR 服务提供商")
     ocr_model: str = Field(default="qwen-vl-plus", alias="OCR_MODEL", description="OCR 模型")
     ocr_concurrency: int = Field(default=5, alias="OCR_CONCURRENCY", description="OCR 并发数")
     ocr_rpm: int = Field(default=60, alias="OCR_RPM", description="OCR 每分钟请求限制")
@@ -151,6 +150,18 @@ class AppConfig(BaseSettings):
     )
     frame_min_interval: int = Field(default=2, alias="FRAME_MIN_INTERVAL", description="最小帧间隔 (秒)")
     frame_max_width: int = Field(default=1920, alias="FRAME_MAX_WIDTH", description="最大帧宽度 (像素)")
+    sample_interval_sec: int = Field(default=1, alias="SAMPLE_INTERVAL_SEC", description="采样间隔 (秒)")
+    phash_size: int = Field(default=16, alias="PHASH_SIZE", description="PHASH 哈希大小")
+    similarity_threshold: float = Field(default=20, alias="PHASH_SIMILARITY_THRESHOLD", description="PHASH 相似度阈值")
+    max_frames: int = Field(default=0, alias="PPT_MAX_FRAMES", description="最大处理帧数")
+    min_content_ratio: float = Field(default=0.15, alias="PPT_MIN_CONTENT_RATIO", description="最小内容比例")
+    output_width: int = Field(default=1920, alias="PPT_OUTPUT_WIDTH", description="输出图片宽度")
+    output_quality: int = Field(default=85, alias="PPT_OUTPUT_QUALITY", description="JPEG 质量")
+    enable_slide_filter: bool = Field(default=True, alias="PPT_ENABLE_SLIDE_FILTER", description="启用PPT内容过滤")
+    enable_stability_check: bool = Field(default=True, alias="PPT_ENABLE_STABILITY_CHECK", description="稳定性检测（较慢，按需开启）")
+    stability_seconds: int = Field(default=1, alias="PPT_STABILITY_SECONDS", description="稳定性检测窗口（秒）")
+    min_frames_for_parallel: int = Field(default=3000, alias="PPT_MIN_FRAMES_FOR_PARALLEL", description="并行处理最小帧数")
+    num_workers: int = Field(default=8, alias="PPT_NUM_WORKERS", description="并行处理工作线程数")
 
     # ============== 剪辑配置 ==============
     cutting_mode_essential_delete_labels: str = Field(

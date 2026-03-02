@@ -4,6 +4,7 @@ ASR 转录任务
 使用 DashScope paraformer-v2 模型进行语音识别。
 """
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,23 @@ from services.dashscope import DashScopeClient
 from services.redis_client import update_progress
 
 logger = setup_logging()
+
+
+def _run_async(coro):
+    """
+    安全地运行异步函数
+
+    检测是否有运行中的事件循环，如果有则使用 nest_asyncio
+    """
+    try:
+        asyncio.get_running_loop()
+        # 已经有事件循环在运行，应用 nest_asyncio
+        import nest_asyncio
+        nest_asyncio.apply()
+    except RuntimeError:
+        pass  # 没有运行中的事件循环
+
+    return asyncio.run(coro)
 
 
 class ASRTranscriptError(VideoProcessingException):
@@ -69,11 +87,12 @@ def transcribe_audio(
         )
 
         # 调用 ASR API (异步模式 + 轮询)
-        result = client.transcribe(
+        # 使用 _run_async 安全地处理异步调用（兼容已存在事件循环的情况）
+        result = _run_async(client.transcribe(
             audio_url=audio_url,
             language=language,
             max_wait=600000,  # 10 分钟超时
-        )
+        ))
 
         # 保存转录结果
         output_path = Path(output_dir)
@@ -83,8 +102,8 @@ def transcribe_audio(
         with open(transcript_file, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
 
-        # 统计信息
-        utterances = result.get("output", {}).get("results", [])
+        # 统计信息 - 转换后的格式使用 "utterances" 键
+        utterances = result.get("utterances", [])
         total_duration = 0
         word_count = 0
 
@@ -152,11 +171,11 @@ def convert_transcript(
     logger.info(f"转换转录结果: {transcript_file}")
 
     try:
-        # 读取原始转录
+        # 读取原始转录 - 转换后的格式使用 "utterances" 键
         with open(transcript_file, "r", encoding="utf-8") as f:
             transcript_data = json.load(f)
 
-        utterances = transcript_data.get("output", {}).get("results", [])
+        utterances = transcript_data.get("utterances", [])
 
         # 构建字级别列表
         words = []
@@ -239,11 +258,14 @@ def convert_transcript(
         with open(subtitles_file, "w", encoding="utf-8") as f:
             json.dump({"words": words}, f, ensure_ascii=False, indent=2)
 
-        # 保存 sentences.txt
+        # 保存 sentences.txt (格式: idx|start_time-end_time|text)
         sentences_file = output_path / "sentences.txt"
         with open(sentences_file, "w", encoding="utf-8") as f:
             for sent in sentences:
-                f.write(f'{sent["idx"]}|{sent["start_idx"]}-{sent["end_idx"]}|{sent["text"]}\n')
+                # 使用实际时间（秒），保留3位小数
+                start_ts = f"{sent['start_time']:.3f}"
+                end_ts = f"{sent['end_time']:.3f}"
+                f.write(f'{sent["idx"]}|{start_ts}-{end_ts}|{sent["text"]}\n')
 
         # 保存 transcript_converted.json
         converted_file = output_path / "transcript_converted.json"

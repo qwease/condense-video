@@ -50,7 +50,6 @@ DASHSCOPE_LLM_MODEL=qwen-plus
 DASHSCOPE_TTS_MODEL=qwen3-tts-flash
 
 # ============== OCR 配置 ==============
-OCR_PROVIDER=dashscope
 OCR_MODEL=qwen-vl-plus
 OCR_CONCURRENCY=5
 OCR_RPM=60
@@ -142,7 +141,6 @@ TASK_MAX_RETRIES=3
 
 | 原配置路径 | 新配置环境变量 | 默认值 |
 |------------|----------------|--------|
-| `ocr.provider` | `OCR_PROVIDER` | dashscope |
 | `ocr.model` | `OCR_MODEL` | qwen-vl-plus |
 | `ocr.concurrency` | `OCR_CONCURRENCY` | 5 |
 | `ocr.rpm` | `OCR_RPM` | 60 |
@@ -247,7 +245,6 @@ class AppConfig(BaseSettings):
     dashscope_tts_model: str = Field(default="qwen3-tts-flash", alias="DASHSCOPE_TTS_MODEL")
 
     # ============== OCR 配置 ==============
-    ocr_provider: str = Field(default="dashscope", alias="OCR_PROVIDER")
     ocr_model: str = Field(default="qwen-vl-plus", alias="OCR_MODEL")
     ocr_concurrency: int = Field(default=5, alias="OCR_CONCURRENCY")
     ocr_rpm: int = Field(default=60, alias="OCR_RPM")

@@ -119,7 +119,6 @@ class FileInfo(BaseModel):
     url: str
     filename: str
     size: int | None = None
-    content_type: str
 
 
 # ==================== 视频处理结果 ====================
@@ -145,7 +144,7 @@ class StepFileInfo(BaseModel):
 
 class Statistics(BaseModel):
     """统计信息"""
-    duration: dict | None = None
+    duration: float | None = None
     sentences: dict | None = None
     chapters_count: int | None = None
 

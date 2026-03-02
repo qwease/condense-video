@@ -5,10 +5,12 @@
 """
 
 import os
-import aiofiles
-import aiohttp
+import shutil
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
+
+import requests
 
 from celery import shared_task
 from core.config import settings
@@ -65,40 +67,66 @@ def download_video(
         output_file = Path(output_path)
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # 下载文件
-        import requests
+        # 检查是否为本地文件 (file:// URL)
+        if video_url.startswith("file://"):
+            # 移除 file:// 前缀并解码 URL 编码
+            local_path = unquote(video_url[7:])  # 移除 "file://"
+            logger.info(f"检测到本地文件 URL，解析后: {local_path}")
 
-        response = requests.get(video_url, stream=True, timeout=300)
-        response.raise_for_status()
+            # 修复 Windows 路径格式: /c:/path -> c:/path 或 c:\path
+            if local_path.startswith("/") and len(local_path) > 2 and local_path[2] == ":":
+                # Windows 路径: /C:/... -> C:/...
+                local_path = local_path[1:]
 
-        total_size = int(response.headers.get("content-length", 0))
-        downloaded = 0
+            # 尝试多种路径格式
+            path_obj = Path(local_path)
+            if not path_obj.exists():
+                # 尝试使用原始路径（保留斜杠）
+                import os
+                if os.path.exists(local_path):
+                    path_obj = Path(local_path)
+                else:
+                    raise VideoDownloadError(f"本地文件不存在: {local_path}")
 
-        with open(output_file, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-                    downloaded += len(chunk)
+            logger.info(f"检测到本地文件，复制: {path_obj} -> {output_file}")
 
-                    # 更新进度
-                    if total_size > 0:
-                        progress = min(0.1, downloaded / total_size * 0.1)
-                        update_progress(
-                            task_id,
-                            "video_download",
-                            progress,
-                            f"正在下载视频: {downloaded / 1024 / 1024:.1f}MB / {total_size / 1024 / 1024:.1f}MB",
-                        )
+            # 复制文件
+            shutil.copy2(str(path_obj), output_file)
+            file_size = output_file.stat().st_size
 
-        file_size = output_file.stat().st_size
+            logger.info(f"视频复制完成: {output_file} ({file_size} bytes)")
+        else:
+            # 下载远程文件
+            response = requests.get(video_url, stream=True, timeout=300)
+            response.raise_for_status()
 
-        logger.info(f"视频下载完成: {output_file} ({file_size} bytes)")
+            total_size = int(response.headers.get("content-length", 0))
+            downloaded = 0
+
+            with open(output_file, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+
+                        # 更新进度
+                        if total_size > 0:
+                            progress = min(0.1, downloaded / total_size * 0.1)
+                            update_progress(
+                                task_id,
+                                "video_download",
+                                progress,
+                                f"正在下载视频: {downloaded / 1024 / 1024:.1f}MB / {total_size / 1024 / 1024:.1f}MB",
+                            )
+
+            file_size = output_file.stat().st_size
+            logger.info(f"视频下载完成: {output_file} ({file_size} bytes)")
 
         update_progress(
             task_id,
             "video_download",
             0.1,
-            f"视频下载完成: {output_file.name}",
+            f"视频处理完成: {output_file.name}",
         )
 
         return {
@@ -108,7 +136,7 @@ def download_video(
             "filename": output_file.name,
         }
 
-    except requests.RequestError as e:
+    except requests.RequestException as e:
         logger.error(f"下载视频失败: {e}")
         update_progress(
             task_id,
@@ -164,13 +192,11 @@ def receive_video(
         work_path = Path(work_dir)
         work_path.mkdir(parents=True, exist_ok=True)
 
-        # 如果是临时文件，移动到工作目录
-        final_path = work_path / video_file.name
+        # 重命名为 task_id.mp4，与后续任务路径匹配
+        final_path = work_path / f"{task_id}.mp4"
 
         # 如果视频文件不在工作目录，复制过去
         if video_file.parent != work_path:
-            import shutil
-
             shutil.copy2(video_file, final_path)
             logger.info(f"视频文件已复制到: {final_path}")
 
