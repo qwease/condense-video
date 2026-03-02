@@ -56,5 +56,5 @@ scripts/
 .reports/
 PAT
 cmd
-*.mp4
+**/*.mp4
 data
