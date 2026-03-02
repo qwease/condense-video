@@ -1,7 +1,5 @@
 # Docker Compose 配置
-# 用于在 Windows 上运行 Linux-only 组件 (Celery Worker)
-
-version: '3.8'
+# 完整的视频浓缩服务：API + Celery Worker + Redis + MinIO
 
 services:
   # ============== Redis ==============
@@ -13,12 +11,13 @@ services:
       - redis_data:/data
     command: redis-server --appendonly yes
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 3s
       retries: 5
     networks:
       - condense-video-network
+    restart: unless-stopped
 
   # ============== MinIO (对象存储) ==============
   minio:
@@ -33,12 +32,42 @@ services:
       - minio_data:/data
     command: server /data --console-address ":9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 30s
       timeout: 20s
       retries: 3
     networks:
       - condense-video-network
+    restart: unless-stopped
+
+  # ============== FastAPI 服务 ==============
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    ports:
+      - "58000:8000"
+    env_file:
+      - ../.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ../data:/app/data
+      - ../logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - condense-video-network
+    restart: unless-stopped
 
   # ============== Celery Worker ==============
   worker:
@@ -53,16 +82,25 @@ services:
       - REDIS_URL=redis://redis:6379/0
     volumes:
       - ../data:/app/data
-      - ../rules:/app/rules:ro
+      - ../logs:/app/logs
       - /tmp/ffmpeg:/tmp/ffmpeg
     depends_on:
       redis:
         condition: service_healthy
+      api:
+        condition: service_healthy
     deploy:
       replicas: ${WORKER_REPLICAS:-2}
-    command: celery -A tasks.celery_app worker --loglevel=info --concurrency=${WORKER_CONCURRENCY:-2}
+    command: celery -A tasks.celery_app worker --loglevel=info --concurrency=${WORKER_CONCURRENCY:-2} --pool=solo
+    healthcheck:
+      test: [ "CMD", "celery", "-A", "tasks.celery_app", "inspect", "ping" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     networks:
       - condense-video-network
+    restart: unless-stopped
 
   # ============== Flower (Celery 监控面板) ==============
   flower:
@@ -74,15 +112,24 @@ services:
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - FLOWER_UNAUTHENTICATED_API=true
     depends_on:
       - redis
+      - worker
     command: celery -A tasks.celery_app flower --port=5555 --broker=redis://redis:6379/0
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5555" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
       - condense-video-network
+    restart: unless-stopped
 
 volumes:
   redis_data:
   minio_data:
+
 
 networks:
   condense-video-network:

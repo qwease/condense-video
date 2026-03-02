@@ -6,6 +6,9 @@
 # Celery (Worker)
 celery[redis]>=5.3
 
+# Flower (监控)
+flower>=2.0
+
 # 视频处理
 opencv-python>=4.8
 Pillow>=10.0
@@ -19,3 +22,5 @@ edge-tts>=6.1
 
 # MinIO (可选)
 minio>=7.0
+
+pydub
