@@ -1,21 +1,113 @@
 Codemap Generation Report - condense-video
-Generated: 2026-02-27
+Generated: 2026-03-02
 
 SUMMARY
 -------
-Created initial codemap documentation (100% new files)
+Major architecture evolution detected - Codebase migrated from Node.js/Python hybrid
+to full Python backend with FastAPI + Celery architecture.
 
-FILES CREATED
+CHANGE SUMMARY
+--------------
+- Overall Change: ~85% (Major restructure)
+- architecture.md: Updated with new FastAPI + Celery architecture
+- backend.md: Completely rewritten for Python backend structure
+- data.md: Updated with Redis state structures and API schemas
+- frontend.md: NEW - API client integration guide
+
+FILES UPDATED
 -------------
-codemaps/architecture.md  - Overall architecture overview
-codemaps/backend.md       - Scripts, APIs, and configuration
-codemaps/data.md          - Data models and schemas
+codemaps/architecture.md  - Overall architecture (FastAPI + Celery + Redis)
+codemaps/backend.md       - Python backend (FastAPI routers, Celery tasks, services)
+codemaps/data.md          - Redis state + API schemas + legacy data models
 
-ANALYSIS
---------
-- Project Type: Claude Code Skill (video content extraction)
-- Languages: Node.js + Python hybrid
-- Key Dependencies: DashScope API, FFmpeg
-- Workflow: ASR transcription + PPT OCR + AI classification + TTS + video editing
+KEY ARCHITECTURE CHANGES
+------------------------
 
-NO PREVIOUS CODEMAPS - Initial generation complete
+BEFORE (Node.js + Python hybrid):
+- JavaScript for orchestration
+- Standalone scripts for each operation
+- Manual workflow execution
+- File-based state management
+
+AFTER (Python + FastAPI + Celery):
+- FastAPI REST API with WebSocket support
+- Celery distributed task queue with 5 queues (video, asr, ocr, llm, tts)
+- Redis for state management and caching
+- Real-time progress updates via WebSocket
+
+NEW MODULES
+-----------
+api/                  - FastAPI application
+  ├── main.py         - Application entry point
+  ├── routers/        - health, tasks, videos, ws endpoints
+  └── schemas/        - Pydantic request/response models
+
+tasks/                - Celery tasks
+  ├── celery_app.py   - Celery configuration
+  ├── workflows.py    - Orchestration
+  ├── asr/            - ASR transcription
+  ├── ppt/            - PPT extraction & OCR
+  ├── llm/            - AI classification
+  ├── tts/            - TTS generation
+  └── video/          - Video processing
+
+services/             - External service clients
+  ├── dashscope.py    - DashScope API client
+  └── redis_client.py - Redis state management
+
+core/                 - Core business logic
+  ├── config.py       - Pydantic settings
+  ├── exceptions.py   - Custom exceptions
+  ├── logging.py      - Loguru configuration
+  ├── progress.py     - Progress tracking
+  └── storage.py      - Storage abstraction
+
+NEW API ENDPOINTS
+-----------------
+GET /health                   - Health check
+GET /health/ready             - Readiness probe
+GET /health/live              - Liveness probe
+POST /api/v1/tasks            - Submit processing task
+GET /api/v1/tasks/{id}        - Query task status
+DELETE /api/v1/tasks/{id}     - Cancel task
+GET /api/v1/tasks/{id}/logs   - Get task logs
+POST /api/v1/videos/process   - Process video from URL
+POST /api/v1/videos/upload    - Upload and process video
+WS /api/v1/ws/{task_id}       - Real-time progress updates
+
+CELERY QUEUES
+-------------
+- video: download, receive, edit, merge
+- asr: extract_audio, transcribe, convert
+- ocr: extract_frames, ocr_slides
+- llm: classify, segment, summarize
+- tts: generate_tts
+
+REDIS DATA STRUCTURES
+---------------------
+Key: task:{task_id}
+Value: { status, progress, current_step, message, created_at, updated_at, result }
+TTL: 2592000 (30 days)
+
+Key: task:{task_id}:progress
+Value: { step, progress, message, timestamp }
+TTL: 604800 (7 days)
+
+LEGACY CODE
+-----------
+The scripts/ directory contains original JavaScript implementation:
+- dashscope_transcribe.js
+- ocr_slides.js
+- classify_content.js
+- generate_tts.js
+- compose_video.js
+
+These are maintained for backward compatibility but superseded by Python implementation.
+
+NEXT STEPS
+----------
+1. Consider implementing a dedicated frontend (React/Vue/Svelte)
+2. Add authentication/authorization
+3. Implement file storage abstraction (MinIO/S3)
+4. Add more comprehensive error handling
+5. Consider adding rate limiting

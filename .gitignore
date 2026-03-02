@@ -51,4 +51,10 @@ data/output/
 Thumbs.db
 
 # Node.js (legacy)
-scripts/node_modules/
+scripts/
+
+.reports/
+PAT
+cmd
+*.mp4
+data

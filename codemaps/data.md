@@ -1,6 +1,94 @@
 # Data Models - condense-video
 
-**Last Updated**: 2026-02-27
+**Last Updated**: 2026-03-02
+
+## Redis State Structures
+
+Task state is stored in Redis with the following keys:
+
+```python
+# Task status
+key: "task:{task_id}"
+value: {
+    "task_id": str,
+    "status": "pending" | "processing" | "success" | "failed" | "cancelled",
+    "progress": float,  # 0.0 - 1.0
+    "current_step": str,
+    "message": str,
+    "created_at": ISO datetime,
+    "updated_at": ISO datetime,
+    "result": dict | None,
+}
+ttl: 2592000  # 30 days
+
+# Task progress
+key: "task:{task_id}:progress"
+value: {
+    "step": str,
+    "progress": float,
+    "message": str,
+    "timestamp": ISO datetime,
+}
+ttl: 604800  # 7 days
+
+# Task result
+key: "task:{task_id}:result"
+value: dict  # Final processing result
+ttl: 2592000  # 30 days
+```
+
+## API Request/Response Schemas
+
+### ProcessVideoRequest
+
+```python
+class ProcessVideoRequest(BaseModel):
+    video_url: str | None = None      # Video URL
+    video_name: str = "video"         # Output directory name
+    mode: ProcessingMode = "essential"  # essential | complete
+    tts_engine: TTSEngine = "dashscope"  # dashscope | edgetts
+    voice: str = "Cherry"             # TTS voice name
+    skip_transcribe: bool = False     # Skip ASR step
+    skip_ocr: bool = False            # Skip OCR step
+    options: dict | None = None       # Additional options
+```
+
+### TaskResponse
+
+```python
+class TaskResponse(BaseModel):
+    task_id: str
+    status: TaskStatus                 # pending | processing | success | failed | cancelled
+    progress: float                    # 0.0 - 1.0
+    current_step: str | None
+    message: str
+    created_at: datetime
+    updated_at: datetime
+    result: dict | None
+```
+
+### VideoProcessResult
+
+```python
+class VideoProcessResult(BaseModel):
+    # Video outputs
+    condensed_video_url: str | None
+    condensed_video_tts_url: str | None
+
+    # Script outputs
+    script: ScriptFileInfo | None
+
+    # Steps
+    steps: StepFileInfo | None
+
+    # Statistics
+    statistics: Statistics | None
+
+    # Chapters
+    chapters: list[ChapterInfo]
+```
+
+## Core Data Schemas (Legacy)
 
 ## Core Data Schemas
 
